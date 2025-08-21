@@ -21,7 +21,7 @@
 //-----------------------------------------------------------------------------
 
 #include "platform/platform.h"
-#include "T3D/vehicles/flyingVehicle.h"
+#include "T3D/vehicles/spaceVehicle.h"
 
 #include "app/game.h"
 #include "math/mMath.h"
@@ -50,17 +50,17 @@ const static U32 sCollisionMoveMask = ( TerrainObjectType | WaterObjectType     
 static U32 sServerCollisionMask = sCollisionMoveMask; // ItemObjectType
 static U32 sClientCollisionMask = sCollisionMoveMask;
 
-typedef FlyingVehicleData::Sounds engineSounds;
-DefineEnumType(engineSounds);
+typedef SpaceVehicleData::Sounds SpaceVehicleSounds;
+DefineEnumType(SpaceVehicleSounds);
 
-ImplementEnumType(engineSounds, "enum types.\n"
+ImplementEnumType(SpaceVehicleSounds, "enum types.\n"
    "@ingroup VehicleData\n\n")
-   { engineSounds::JetSound, "JetSound", "..." },
-   { engineSounds::EngineSound,  "EngineSound", "..." },
+   { SpaceVehicleSounds::JetSound, "JetSound", "..." },
+   { SpaceVehicleSounds::EngineSound,  "EngineSound", "..." },
       EndImplementEnumType;
 
 //
-const char* FlyingVehicle::sJetSequence[FlyingVehicle::JetAnimCount] =
+const char* SpaceVehicle::sJetSequence[SpaceVehicle::JetAnimCount] =
 {
    "activateBack",
    "maintainBack",
@@ -68,7 +68,7 @@ const char* FlyingVehicle::sJetSequence[FlyingVehicle::JetAnimCount] =
    "maintainBot",
 };
 
-const char* FlyingVehicleData::sJetNode[FlyingVehicleData::MaxJetNodes] =
+const char* SpaceVehicleData::sJetNode[SpaceVehicleData::MaxJetNodes] =
 {
    "JetNozzle0",  // Thrust Forward
    "JetNozzle1",
@@ -76,6 +76,8 @@ const char* FlyingVehicleData::sJetNode[FlyingVehicleData::MaxJetNodes] =
    "JetNozzleY",
    "JetNozzle2",  // Thrust Downward
    "JetNozzle3",
+   "JetNozzle4",  // Thrust Upward
+   "JetNozzle5",
    "contrail0",   // Trail
    "contrail1",
    "contrail2",
@@ -83,23 +85,24 @@ const char* FlyingVehicleData::sJetNode[FlyingVehicleData::MaxJetNodes] =
 };
 
 // Convert thrust direction into nodes & emitters
-FlyingVehicle::JetActivation FlyingVehicle::sJetActivation[NumThrustDirections] = {
-   { FlyingVehicleData::ForwardJetNode, FlyingVehicleData::ForwardJetEmitter },
-   { FlyingVehicleData::BackwardJetNode, FlyingVehicleData::BackwardJetEmitter },
-   { FlyingVehicleData::DownwardJetNode, FlyingVehicleData::DownwardJetEmitter },
+SpaceVehicle::JetActivation SpaceVehicle::sJetActivation[NumThrustDirections] = {
+   { SpaceVehicleData::ForwardJetNode, SpaceVehicleData::ForwardJetEmitter },
+   { SpaceVehicleData::BackwardJetNode, SpaceVehicleData::BackwardJetEmitter },
+   { SpaceVehicleData::DownwardJetNode, SpaceVehicleData::DownwardJetEmitter },
+   { SpaceVehicleData::UpwardJetNode, SpaceVehicleData::UpwardJetEmitter },
 };
 
 
 //----------------------------------------------------------------------------
 
-IMPLEMENT_CO_DATABLOCK_V1(FlyingVehicleData);
+IMPLEMENT_CO_DATABLOCK_V1(SpaceVehicleData);
 
-ConsoleDocClass( FlyingVehicleData,
-   "@brief Defines the properties of a FlyingVehicle.\n\n"
+ConsoleDocClass(SpaceVehicleData,
+   "@brief Defines the properties of a SpaceVehicle.\n\n"
    "@ingroup Vehicles\n"
 );
 
-FlyingVehicleData::FlyingVehicleData()
+SpaceVehicleData::SpaceVehicleData()
 {
    maneuveringForce = 0;
    horizontalSurfaceForce = 0;
@@ -115,6 +118,8 @@ FlyingVehicleData::FlyingVehicleData()
    hoverHeight = 2;
    createHoverHeight = 2;
    maxSteeringAngle = M_PI_F;
+   maxRollingAngle = M_PI_F;
+
    minTrailSpeed = 1;
    maxSpeed = 100;
 
@@ -125,12 +130,12 @@ FlyingVehicleData::FlyingVehicleData()
       jetEmitter[j] = 0;
 
    for (S32 i = 0; i < MaxSounds; i++)
-      INIT_SOUNDASSET_ARRAY(FlyingSounds, i);
+      INIT_SOUNDASSET_ARRAY(SpacingSounds, i);
 
    vertThrustMultiple = 1.0;
 }
 
-bool FlyingVehicleData::preload(bool server, String &errorStr)
+bool SpaceVehicleData::preload(bool server, String &errorStr)
 {
    if (!Parent::preload(server, errorStr))
       return false;
@@ -141,7 +146,7 @@ bool FlyingVehicleData::preload(bool server, String &errorStr)
    if (!server) {
       for (S32 i = 0; i < MaxSounds; i++)
       {
-         if (!isFlyingSoundsValid(i))
+         if (!isSpacingSoundsValid(i))
          {
             //return false; -TODO: trigger asset download
          }
@@ -173,94 +178,99 @@ bool FlyingVehicleData::preload(bool server, String &errorStr)
    return true;
 }
 
-void FlyingVehicleData::initPersistFields()
+void SpaceVehicleData::initPersistFields()
 {
    docsURL;
    Parent::initPersistFields();
 
    addGroup("Physics");
-   addFieldV( "rollForce", TypeRangedF32, Offset(rollForce, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "rollForce", TypeRangedF32, Offset(rollForce, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "@brief Damping torque against rolling maneuvers (rotation about the y-axis), "
       "proportional to linear velocity.\n\n"
       "Acts to adjust roll to a stable position over time as the vehicle moves." );
-   addFieldV( "rotationalDrag", TypeRangedF32, Offset(rotationalDrag, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "rotationalDrag", TypeRangedF32, Offset(rotationalDrag, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "Rotational drag factor (slows vehicle rotation speed in all axes)." );
-   addFieldV( "horizontalSurfaceForce", TypeRangedF32, Offset(horizontalSurfaceForce, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "horizontalSurfaceForce", TypeRangedF32, Offset(horizontalSurfaceForce, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "@brief Damping force in the opposite direction to sideways velocity.\n\n"
       "Provides \"bite\" into the wind for climbing/diving and turning)." );
-   addFieldV( "hoverHeight", TypeRangedF32, Offset(hoverHeight, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "hoverHeight", TypeRangedF32, Offset(hoverHeight, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "The vehicle's height off the ground when at rest." );
-   addFieldV( "createHoverHeight", TypeRangedF32, Offset(createHoverHeight, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "createHoverHeight", TypeRangedF32, Offset(createHoverHeight, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "@brief The vehicle's height off the ground when useCreateHeight is active.\n\n"
       "This can help avoid problems with spawning the vehicle." );
    endGroup("Physics");
 
    addGroup("Steering");
-   addFieldV( "maneuveringForce", TypeRangedF32, Offset(maneuveringForce, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "maneuveringForce", TypeRangedF32, Offset(maneuveringForce, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "@brief Maximum X and Y (horizontal plane) maneuvering force.\n\n"
       "The actual force applied depends on the current thrust." );
-   addFieldV( "verticalSurfaceForce", TypeRangedF32, Offset(verticalSurfaceForce, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "verticalSurfaceForce", TypeRangedF32, Offset(verticalSurfaceForce, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "@brief Damping force in the opposite direction to vertical velocity.\n\n"
       "Controls side slip; lower numbers give more slide." );
-   addFieldV( "vertThrustMultiple", TypeRangedF32, Offset(vertThrustMultiple, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "vertThrustMultiple", TypeRangedF32, Offset(vertThrustMultiple, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "Multiplier applied to the jetForce (defined in VehicleData) when thrusting vertically." );
-   addFieldV( "steeringForce", TypeRangedF32, Offset(steeringForce, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "steeringForce", TypeRangedF32, Offset(steeringForce, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "@brief Maximum X and Z (sideways and vertical) steering force.\n\n"
       "The actual force applied depends on the current steering input." );
-   addFieldV( "steeringRollForce", TypeRangedF32, Offset(steeringRollForce, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "steeringRollForce", TypeRangedF32, Offset(steeringRollForce, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "Roll force induced by sideways steering input value (controls how much "
       "the vehicle rolls when turning)." );
+   addFieldV("maxRollingAngle", TypeRangedF32, Offset(maxRollingAngle, SpaceVehicleData), &CommonValidators::PositiveFloat, "Max Roll Angle.");
    endGroup("Steering");
 
    addGroup("AutoCorrection");
-   addFieldV( "maxAutoSpeed", TypeRangedF32, Offset(maxAutoSpeed, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "maxAutoSpeed", TypeRangedF32, Offset(maxAutoSpeed, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "Maximum speed for automatic vehicle control assistance - vehicles "
       "travelling at speeds above this value do not get control assitance." );
-   addFieldV( "autoInputDamping", TypeRangedF32, Offset(autoInputDamping, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "autoInputDamping", TypeRangedF32, Offset(autoInputDamping, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "@brief Scale factor applied to steering input if speed is less than "
       "maxAutoSpeed to.improve handling at very low speeds.\n\n"
       "Smaller values make steering less sensitive." );
-   addFieldV( "autoLinearForce", TypeRangedF32, Offset(autoLinearForce, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "autoLinearForce", TypeRangedF32, Offset(autoLinearForce, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "@brief Corrective force applied to slow the vehicle when moving at less than "
       "maxAutoSpeed.\n\n"
       "The force is inversely proportional to vehicle speed." );
-   addFieldV( "autoAngularForce", TypeRangedF32, Offset(autoAngularForce, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "autoAngularForce", TypeRangedF32, Offset(autoAngularForce, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "@brief Corrective torque applied to level out the vehicle when moving at less "
       "than maxAutoSpeed.\n\n"
       "The torque is inversely proportional to vehicle speed." );
    endGroup("AutoCorrection");
 
    addGroup("Particle Effects");
-   addField( "forwardJetEmitter",TYPEID< ParticleEmitterData >(), Offset(jetEmitter[ForwardJetEmitter], FlyingVehicleData),
+   addField( "forwardJetEmitter",TYPEID< ParticleEmitterData >(), Offset(jetEmitter[ForwardJetEmitter], SpaceVehicleData),
       "@brief Emitter to generate particles for forward jet thrust.\n\n"
       "Forward jet thrust particles are emitted from model nodes JetNozzle0 "
       "and JetNozzle1." );
-   addField( "backwardJetEmitter",TYPEID< ParticleEmitterData >(), Offset(jetEmitter[BackwardJetEmitter], FlyingVehicleData),
+   addField( "backwardJetEmitter",TYPEID< ParticleEmitterData >(), Offset(jetEmitter[BackwardJetEmitter], SpaceVehicleData),
       "@brief Emitter to generate particles for backward jet thrust.\n\n"
       "Backward jet thrust particles are emitted from model nodes JetNozzleX "
       "and JetNozzleY." );
-   addField( "downJetEmitter",TYPEID< ParticleEmitterData >(), Offset(jetEmitter[DownwardJetEmitter], FlyingVehicleData),
+   addField("upJetEmitter", TYPEID< ParticleEmitterData >(), Offset(jetEmitter[UpwardJetEmitter], SpaceVehicleData),
+      "@brief Emitter to generate particles for upward jet thrust.\n\n"
+      "Upward jet thrust particles are emitted from model nodes JetNozzle2 "
+      "and JetNozzle3.");
+   addField("downJetEmitter", TYPEID< ParticleEmitterData >(), Offset(jetEmitter[DownwardJetEmitter], SpaceVehicleData),
       "@brief Emitter to generate particles for downward jet thrust.\n\n"
-      "Downward jet thrust particles are emitted from model nodes JetNozzle2 "
-      "and JetNozzle3." );
-   addField( "trailEmitter",TYPEID< ParticleEmitterData >(), Offset(jetEmitter[TrailEmitter], FlyingVehicleData),
+      "Downward jet thrust particles are emitted from model nodes JetNozzle4"
+      "and JetNozzle5.");
+   addField( "trailEmitter",TYPEID< ParticleEmitterData >(), Offset(jetEmitter[TrailEmitter], SpaceVehicleData),
       "Emitter to generate contrail particles from model nodes contrail0 - contrail3." );
-   addFieldV( "minTrailSpeed", TypeRangedF32, Offset(minTrailSpeed, FlyingVehicleData), &CommonValidators::PositiveFloat,
+   addFieldV( "minTrailSpeed", TypeRangedF32, Offset(minTrailSpeed, SpaceVehicleData), &CommonValidators::PositiveFloat,
       "Minimum speed at which to start generating contrail particles." );
    endGroup("Particle Effects");
 
    addGroup("Sounds");
-      INITPERSISTFIELD_SOUNDASSET_ENUMED(FlyingSounds, engineSounds, Sounds::MaxSounds, FlyingVehicleData, "EngineSounds.");
+      INITPERSISTFIELD_SOUNDASSET_ENUMED(SpacingSounds, SpaceVehicleSounds, Sounds::MaxSounds, SpaceVehicleData, "EngineSounds.");
    endGroup("Sounds");
 }
 
-void FlyingVehicleData::packData(BitStream* stream)
+void SpaceVehicleData::packData(BitStream* stream)
 {
    Parent::packData(stream);
 
    for (S32 i = 0; i < MaxSounds; i++)
    {
-      PACKDATA_SOUNDASSET_ARRAY(FlyingSounds, i);
+      PACKDATA_SOUNDASSET_ARRAY(SpacingSounds, i);
    }
 
    for (S32 j = 0; j < MaxJetEmitters; j++)
@@ -279,6 +289,7 @@ void FlyingVehicleData::packData(BitStream* stream)
    stream->write(steeringForce);
    stream->write(steeringRollForce);
    stream->write(rollForce);
+   stream->write(maxRollingAngle);
    stream->write(autoAngularForce);
    stream->write(rotationalDrag);
    stream->write(autoLinearForce);
@@ -289,13 +300,13 @@ void FlyingVehicleData::packData(BitStream* stream)
    stream->write(vertThrustMultiple);
 }
 
-void FlyingVehicleData::unpackData(BitStream* stream)
+void SpaceVehicleData::unpackData(BitStream* stream)
 {
    Parent::unpackData(stream);
 
    for (S32 i = 0; i < MaxSounds; i++)
    {
-      UNPACKDATA_SOUNDASSET_ARRAY(FlyingSounds, i);
+      UNPACKDATA_SOUNDASSET_ARRAY(SpacingSounds, i);
    }
 
    for (S32 j = 0; j < MaxJetEmitters; j++) {
@@ -312,6 +323,7 @@ void FlyingVehicleData::unpackData(BitStream* stream)
    stream->read(&steeringForce);
    stream->read(&steeringRollForce);
    stream->read(&rollForce);
+   stream->read(&maxRollingAngle);
    stream->read(&autoAngularForce);
    stream->read(&rotationalDrag);
    stream->read(&autoLinearForce);
@@ -325,14 +337,14 @@ void FlyingVehicleData::unpackData(BitStream* stream)
 
 //----------------------------------------------------------------------------
 
-IMPLEMENT_CO_NETOBJECT_V1(FlyingVehicle);
+IMPLEMENT_CO_NETOBJECT_V1(SpaceVehicle);
 
-ConsoleDocClass( FlyingVehicle,
+ConsoleDocClass(SpaceVehicle,
    "@brief A flying vehicle.\n\n"
    "@ingroup Vehicles\n"
 );
 
-FlyingVehicle::FlyingVehicle()
+SpaceVehicle::SpaceVehicle()
 {
    mDataBlock = NULL;
    mSteering.set(0,0,0);
@@ -346,7 +358,7 @@ FlyingVehicle::FlyingVehicle()
    mBottomMaintainOn = false;
    createHeightOn = false;
    mCeilingFactor = 1.0f;
-   mThrustDirection = FlyingVehicle::ThrustForward;
+   mThrustDirection = SpaceVehicle::ThrustForward;
    for (U32 i=0;i< JetAnimCount;i++)
       mJetSeq[i] = -1;
 
@@ -354,14 +366,14 @@ FlyingVehicle::FlyingVehicle()
       mJetThread[i] = 0;
 }
 
-FlyingVehicle::~FlyingVehicle()
+SpaceVehicle::~SpaceVehicle()
 {
 }
 
 
 //----------------------------------------------------------------------------
 
-bool FlyingVehicle::onAdd()
+bool SpaceVehicle::onAdd()
 {
    if(!Parent::onAdd())
       return false;
@@ -370,9 +382,9 @@ bool FlyingVehicle::onAdd()
    return true;
 }
 
-bool FlyingVehicle::onNewDataBlock(GameBaseData* dptr, bool reload)
+bool SpaceVehicle::onNewDataBlock(GameBaseData* dptr, bool reload)
 {
-   mDataBlock = dynamic_cast<FlyingVehicleData*>(dptr);
+   mDataBlock = dynamic_cast<SpaceVehicleData*>(dptr);
    if (!mDataBlock || !Parent::onNewDataBlock(dptr,reload))
       return false;
 
@@ -385,11 +397,11 @@ bool FlyingVehicle::onNewDataBlock(GameBaseData* dptr, bool reload)
       SFX_DELETE( mJetSound );
       SFX_DELETE( mEngineSound );
 
-      if ( mDataBlock->getFlyingSounds(FlyingVehicleData::EngineSound) )
-         mEngineSound = SFX->createSource( mDataBlock->getFlyingSoundsProfile(FlyingVehicleData::EngineSound), &getTransform() );
+      if ( mDataBlock->getSpacingSounds(SpaceVehicleData::EngineSound) )
+         mEngineSound = SFX->createSource( mDataBlock->getSpacingSoundsProfile(SpaceVehicleData::EngineSound), &getTransform() );
 
-      if ( mDataBlock->getFlyingSounds(FlyingVehicleData::JetSound))
-         mJetSound = SFX->createSource( mDataBlock->getFlyingSoundsProfile(FlyingVehicleData::JetSound), &getTransform() );
+      if ( mDataBlock->getSpacingSounds(SpaceVehicleData::JetSound))
+         mJetSound = SFX->createSource( mDataBlock->getSpacingSoundsProfile(SpaceVehicleData::JetSound), &getTransform() );
    }
 
    // Jet Sequences
@@ -411,7 +423,7 @@ bool FlyingVehicle::onNewDataBlock(GameBaseData* dptr, bool reload)
    return true;
 }
 
-void FlyingVehicle::onRemove()
+void SpaceVehicle::onRemove()
 {
    SFX_DELETE( mJetSound );
    SFX_DELETE( mEngineSound );
@@ -423,17 +435,17 @@ void FlyingVehicle::onRemove()
 
 //----------------------------------------------------------------------------
 
-void FlyingVehicle::interpolateTick(F32 dt)
+void SpaceVehicle::interpolateTick(F32 dt)
 {
-   PROFILE_SCOPE(FlyingVehicle_InterpolateTick);
+   PROFILE_SCOPE(SpaceVehicle_InterpolateTick);
    Parent::interpolateTick(dt);
    updateEngineSound(1);
    updateJet(dt);
 }
 
-void FlyingVehicle::advanceTime(F32 dt)
+void SpaceVehicle::advanceTime(F32 dt)
 {
-   PROFILE_SCOPE(FlyingVehicle_AdvanceTime);
+   PROFILE_SCOPE(SpaceVehicle_AdvanceTime);
    Parent::advanceTime(dt);
 
    updateEngineSound(1);
@@ -443,9 +455,9 @@ void FlyingVehicle::advanceTime(F32 dt)
 
 //----------------------------------------------------------------------------
 
-void FlyingVehicle::updateMove(const Move* move)
+void SpaceVehicle::updateMove(const Move* move)
 {
-   PROFILE_SCOPE( FlyingVehicle_UpdateMove );
+   PROFILE_SCOPE(SpaceVehicle_UpdateMove );
 
    Parent::updateMove(move);
 
@@ -482,6 +494,7 @@ void FlyingVehicle::updateMove(const Move* move)
 
    mThrust.x = move->x;
    mThrust.y = move->y;
+   mThrust.z = move->z;
 
    if (mThrust.y != 0.0f)
       if (mThrust.y > 0)
@@ -489,7 +502,10 @@ void FlyingVehicle::updateMove(const Move* move)
       else
          mThrustDirection = ThrustBackward;
    else
-      mThrustDirection = ThrustDown;
+      if (mThrust.z != 0.0f)
+         mThrustDirection = ThrustDown;
+      else
+         mThrustDirection = ThrustUp;
 
    if (mCeilingFactor != 1.0f)
       mJetting = false;
@@ -498,9 +514,9 @@ void FlyingVehicle::updateMove(const Move* move)
 
 //----------------------------------------------------------------------------
 
-void FlyingVehicle::updateForces(F32 /*dt*/)
+void SpaceVehicle::updateForces(F32 /*dt*/)
 {
-   PROFILE_SCOPE( FlyingVehicle_UpdateForces );
+   PROFILE_SCOPE( SpaceVehicle_UpdateForces );
 
    if (mDisableMove) return;
    MatrixF currPosMat;
@@ -529,7 +545,7 @@ void FlyingVehicle::updateForces(F32 /*dt*/)
 
       // Gyroscope
       F32 gf = mDataBlock->autoAngularForce * autoScale;
-      torque -= xv * gf * mDot(yv,Point3F(0,0,1));
+      torque -= xv * gf * mDot(yv, Point3F(0,0,1));
 
       // Manuevering jets
       F32 sf = mDataBlock->autoLinearForce * autoScale;
@@ -566,28 +582,35 @@ void FlyingVehicle::updateForces(F32 /*dt*/)
          force += yv * mDataBlock->jetForce * mCeilingFactor;
       else if (mThrustDirection == ThrustBackward)
          force -= yv * mDataBlock->jetForce * mCeilingFactor;
-      else
+      else if (mThrustDirection == ThrustUp)
          force += zv * mDataBlock->jetForce * mDataBlock->vertThrustMultiple * mCeilingFactor;
+      else
+         force -= zv * mDataBlock->jetForce * mDataBlock->vertThrustMultiple * mCeilingFactor;
    }
 
    // Maneuvering jets
    force += yv * (mThrust.y * mDataBlock->maneuveringForce * mCeilingFactor);
    force += xv * (mThrust.x * mDataBlock->maneuveringForce * mCeilingFactor);
+   force += zv * (mThrust.z * mDataBlock->maneuveringForce * mCeilingFactor);
 
    // Steering
-   Point2F steering;
+   Point3F steering;
    steering.x = mSteering.x / mDataBlock->maxSteeringAngle;
    steering.x *= mFabs(steering.x);
    steering.y = mSteering.y / mDataBlock->maxSteeringAngle;
    steering.y *= mFabs(steering.y);
+   steering.z = mSteering.z / (mDataBlock->maxRollingAngle);
+   steering.z *= mFabs(steering.z);
+
    torque -= xv * steering.y * mDataBlock->steeringForce;
+   torque -= yv * steering.z * mDataBlock->steeringForce;
    torque -= zv * steering.x * mDataBlock->steeringForce;
 
    // Roll
-   torque += yv * steering.x * mDataBlock->steeringRollForce;
-   F32 ar = mDataBlock->autoAngularForce * mDot(xv,Point3F(0,0,1));
-   ar -= mDataBlock->rollForce * mDot(xv, mRigid.linVelocity);
-   torque += yv * ar;
+   torque += zv * steering.z * mDataBlock->steeringRollForce;
+   F32 ar = mDataBlock->autoAngularForce * mDot(zv,Point3F(0,0,1));
+   ar -= mDataBlock->rollForce * mDot(zv, mRigid.torque);
+   torque += (zv * ar) - (mRigid.angMomentum);
 
    // Add in force from physical zones...
    force += mAppliedForce;
@@ -602,7 +625,7 @@ void FlyingVehicle::updateForces(F32 /*dt*/)
 
 //----------------------------------------------------------------------------
 
-F32 FlyingVehicle::getHeight()
+F32 SpaceVehicle::getHeight()
 {
    Point3F sp,ep;
    RayInfo collision;
@@ -621,7 +644,7 @@ F32 FlyingVehicle::getHeight()
 
 
 //----------------------------------------------------------------------------
-U32 FlyingVehicle::getCollisionMask()
+U32 SpaceVehicle::getCollisionMask()
 {
    if (isServerObject())
       return sServerCollisionMask;
@@ -631,7 +654,7 @@ U32 FlyingVehicle::getCollisionMask()
 
 //----------------------------------------------------------------------------
 
-void FlyingVehicle::updateEngineSound(F32 level)
+void SpaceVehicle::updateEngineSound(F32 level)
 {
    if ( !mEngineSound )
       return;
@@ -645,7 +668,7 @@ void FlyingVehicle::updateEngineSound(F32 level)
    mEngineSound->setPitch( level );
 }
 
-void FlyingVehicle::updateJet(F32 dt)
+void SpaceVehicle::updateJet(F32 dt)
 {
    // Thrust Animation threads
    //  Back
@@ -703,7 +726,7 @@ void FlyingVehicle::updateJet(F32 dt)
    for (S32 j = 0; j < NumThrustDirections; j++) {
       JetActivation& jet = sJetActivation[j];
       updateEmitter(mJetting && j == mThrustDirection,dt,mDataBlock->jetEmitter[jet.emitter],
-                    jet.node,FlyingVehicleData::MaxDirectionJets);
+                    jet.node, SpaceVehicleData::MaxDirectionJets);
    }
 
    // Trail jets
@@ -716,8 +739,8 @@ void FlyingVehicle::updateJet(F32 dt)
       if (speed < mDataBlock->maxSpeed)
          trail *= (speed - mDataBlock->minTrailSpeed) / mDataBlock->maxSpeed;
    }
-   updateEmitter(trail,trail,mDataBlock->jetEmitter[FlyingVehicleData::TrailEmitter],
-                 FlyingVehicleData::TrailNode,FlyingVehicleData::MaxTrails);
+   updateEmitter(trail,trail,mDataBlock->jetEmitter[SpaceVehicleData::TrailEmitter],
+      SpaceVehicleData::TrailNode, SpaceVehicleData::MaxTrails);
 
    // Allocate/Deallocate voice on demand.
    if ( !mJetSound )
@@ -737,7 +760,7 @@ void FlyingVehicle::updateJet(F32 dt)
 
 //----------------------------------------------------------------------------
 
-void FlyingVehicle::updateEmitter(bool active,F32 dt,ParticleEmitterData *emitter,S32 idx,S32 count)
+void SpaceVehicle::updateEmitter(bool active,F32 dt,ParticleEmitterData *emitter,S32 idx,S32 count)
 {
    if (!emitter)
       return;
@@ -770,12 +793,12 @@ void FlyingVehicle::updateEmitter(bool active,F32 dt,ParticleEmitterData *emitte
 
 //----------------------------------------------------------------------------
 
-void FlyingVehicle::writePacketData(GameConnection *connection, BitStream *stream)
+void SpaceVehicle::writePacketData(GameConnection *connection, BitStream *stream)
 {
    Parent::writePacketData(connection, stream);
 }
 
-void FlyingVehicle::readPacketData(GameConnection *connection, BitStream *stream)
+void SpaceVehicle::readPacketData(GameConnection *connection, BitStream *stream)
 {
    Parent::readPacketData(connection, stream);
 
@@ -784,7 +807,7 @@ void FlyingVehicle::readPacketData(GameConnection *connection, BitStream *stream
    mDelta.rot[1] = mRigid.angPosition;
 }
 
-U32 FlyingVehicle::packUpdate(NetConnection *con, U32 mask, BitStream *stream)
+U32 SpaceVehicle::packUpdate(NetConnection *con, U32 mask, BitStream *stream)
 {
    U32 retMask = Parent::packUpdate(con, mask, stream);
 
@@ -800,7 +823,7 @@ U32 FlyingVehicle::packUpdate(NetConnection *con, U32 mask, BitStream *stream)
    return retMask;
 }
 
-void FlyingVehicle::unpackUpdate(NetConnection *con, BitStream *stream)
+void SpaceVehicle::unpackUpdate(NetConnection *con, BitStream *stream)
 {
    Parent::unpackUpdate(con,stream);
 
@@ -812,13 +835,13 @@ void FlyingVehicle::unpackUpdate(NetConnection *con, BitStream *stream)
    mThrustDirection = ThrustDirection(stream->readInt(NumThrustBits));
 }
 
-void FlyingVehicle::initPersistFields()
+void SpaceVehicle::initPersistFields()
 {
    docsURL;
    Parent::initPersistFields();
 }
 
-DefineEngineMethod( FlyingVehicle, useCreateHeight, void, ( bool enabled ),,
+DefineEngineMethod( SpaceVehicle, useCreateHeight, void, ( bool enabled ),,
    "@brief Set whether the vehicle should temporarily use the createHoverHeight "
    "specified in the datablock.\n\nThis can help avoid problems with spawning.\n"
    "@param enabled true to use the datablock createHoverHeight, false otherwise\n" )
@@ -826,7 +849,7 @@ DefineEngineMethod( FlyingVehicle, useCreateHeight, void, ( bool enabled ),,
    object->useCreateHeight( enabled );
 }
 
-void FlyingVehicle::useCreateHeight(bool val)
+void SpaceVehicle::useCreateHeight(bool val)
 {
    createHeightOn = val;
    setMaskBits(HoverHeight);

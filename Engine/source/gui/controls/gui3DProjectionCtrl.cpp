@@ -46,9 +46,52 @@
 #include "scene/sceneObject.h"  
 #include "T3D/player.h"  
 #include "gui/controls/gui3DProjectionCtrl.h"  
+#include "T3D/gameBase/gameConnection.h"
+#include "gfx/gfxDrawUtil.h"
   
-IMPLEMENT_CONOBJECT(Gui3DProjectionCtrl);  
-  
+IMPLEMENT_CONOBJECT(Gui3DProjectionCtrl);
+
+IMPLEMENT_CALLBACK(Gui3DProjectionCtrl, onObjectEntersView, void, (SceneObject* obj), (obj),
+   "@brief Called when the object this control is attached to enters the view.");
+
+IMPLEMENT_CALLBACK(Gui3DProjectionCtrl, onObjectLeavesView, void, (SceneObject* obj), (obj),
+   "@brief Called when the object this control is attached to leaves the view.");
+
+IMPLEMENT_CALLBACK(Gui3DProjectionCtrl, onProjectionBleedover, void, (S32 bleedTypes), (bleedTypes),
+   "@brief Called when the object this control is attached to leaves the view.");
+
+ImplementEnumType(Gui3DProjHorizAlignment,
+   "Horizontal Alignment of the project control.\n\n"
+   "@ingroup GuiControl")
+{
+   Gui3DProjectionCtrl::left, "left"
+},
+{ Gui3DProjectionCtrl::horizCenter, "center" },
+{ Gui3DProjectionCtrl::right,       "right" }
+EndImplementEnumType;
+
+ImplementEnumType(Gui3DProjVertAlignment,
+   "Vertical Alignment of the project control.\n\n"
+   "@ingroup GuiControl")
+{
+   Gui3DProjectionCtrl::top, "top"
+},
+{ Gui3DProjectionCtrl::vertCenter, "center" },
+{ Gui3DProjectionCtrl::bottom,       "bottom" }
+EndImplementEnumType;
+
+ImplementEnumType(Gui3DProjAnimMode,
+   "Animation mode for the control.\n\n"
+   "@ingroup GuiControl")
+{ Gui3DProjectionCtrl::animNone, "None" },
+{ Gui3DProjectionCtrl::animSingleBob, "SingleBob" },
+{ Gui3DProjectionCtrl::animLoopBob,       "LoopBob" }
+EndImplementEnumType;
+
+static U32 gBoundsBleedLEFT = Gui3DProjectionCtrl::BLEEDLEFT;
+static U32 gBoundsBleedRIGHT = Gui3DProjectionCtrl::BLEEDRIGHT;
+static U32 gBoundsBleedBOTTOM = Gui3DProjectionCtrl::BLEEDBOTTOM;
+static U32 gBoundsBleedTOP = Gui3DProjectionCtrl::BLEEDTOP;
 //-----------------------------------------------------------------------------  
   
 Gui3DProjectionCtrl::Gui3DProjectionCtrl()  
@@ -57,8 +100,8 @@ Gui3DProjectionCtrl::Gui3DProjectionCtrl()
    mAttachedTo       = NULL;  
    mAttachedToPlayer = NULL;  
    mAutoDelete       = true;  
-   mHAlign           = center;  
-   mVAlign           = center;  
+   mHAlign           = horizCenter;  
+   mVAlign           = vertCenter;  
    mUseEyePoint.x    = 0;  
    mUseEyePoint.y    = 1;  
   
@@ -66,7 +109,20 @@ Gui3DProjectionCtrl::Gui3DProjectionCtrl()
    mPtProj      .set(0, 0);  
    mOffsetObject.set(0, 0, 0);  
    mOffsetWorld .set(0, 0, 0);  
-   mOffsetScreen.set(0, 0);  
+   mOffsetScreen.set(0, 0);
+   mTargetNodeName = StringTable->EmptyString();
+
+   mAllowOcclusion = false;
+   mOnlyInView = false;
+   mIsObjInView = false;
+   mBoundsBleed.clear();
+   mObjInview = false;
+   mFrameTime = PlatformTimer::create();
+
+   mAnimationMode = animNone;
+   mAnimationPos = 0.0f;
+   mAnimationSpeed = 5;
+   mAnimDirScalar = Point2F::Zero;
 }  
   
 void Gui3DProjectionCtrl::initPersistFields()  
@@ -77,32 +133,267 @@ void Gui3DProjectionCtrl::initPersistFields()
    addField("pointWorld"      , TypePoint3F , Offset(mPtWorld          , Gui3DProjectionCtrl));  
    addField("offsetObject"    , TypePoint3F , Offset(mOffsetObject     , Gui3DProjectionCtrl));  
    addField("offsetWorld"     , TypePoint3F , Offset(mOffsetWorld      , Gui3DProjectionCtrl));  
-   addField("offsetScreen"    , TypePoint2I , Offset(mOffsetScreen     , Gui3DProjectionCtrl));  
-   addField("hAlign"          , TypeS32     , Offset(mHAlign           , Gui3DProjectionCtrl));  
-   addField("vAlign"          , TypeS32     , Offset(mVAlign           , Gui3DProjectionCtrl));  
+   addField("offsetScreen"    , TypePoint2I , Offset(mOffsetScreen     , Gui3DProjectionCtrl));
+
+   addField("horizAlign", TYPEID< HorizAlignment >(), Offset(mHAlign, Gui3DProjectionCtrl),
+      "The horizontal resizing behavior.");
+   addField("vertAlign", TYPEID< VertAlignment >(), Offset(mVAlign, Gui3DProjectionCtrl),
+      "The vertical resizing behavior.");
+
    addField("useEyePoint"     , TypePoint2I , Offset(mUseEyePoint      , Gui3DProjectionCtrl));  
-   addField("autoDelete"      , TypeBool    , Offset(mAutoDelete       , Gui3DProjectionCtrl));  
-   endGroup("3DProjection");  
+   addField("autoDelete"      , TypeBool    , Offset(mAutoDelete       , Gui3DProjectionCtrl));
+   addField("targetNodeName",   TypeString,  Offset(mTargetNodeName,    Gui3DProjectionCtrl));
+   addField("allowOcclusion",   TypeBool,    Offset(mAllowOcclusion,    Gui3DProjectionCtrl));
+   addField("onlyInView",       TypeBool,    Offset(mOnlyInView,        Gui3DProjectionCtrl));
+
+   addField("aninmationMode", TYPEID< AnimationMode >(), Offset(mAnimationMode, Gui3DProjectionCtrl),
+      "The mode of animation for the control.");
+   addField("animationScalar", TypePoint2F, Offset(mAnimDirScalar, Gui3DProjectionCtrl));
+   addField("animationSpeed", TypeF32, Offset(mAnimationSpeed, Gui3DProjectionCtrl));
+   endGroup("3DProjection");
+
+   Con::addVariable("BoundsBleed::Left", TypeS32, &gBoundsBleedLEFT);
+   Con::addVariable("BoundsBleed::Right", TypeS32, &gBoundsBleedRIGHT);
+   Con::addVariable("BoundsBleed::Top", TypeS32, &gBoundsBleedTOP);
+   Con::addVariable("BoundsBleed::Bottom", TypeS32, &gBoundsBleedBOTTOM);
 }  
   
 void Gui3DProjectionCtrl::onRender(Point2I offset, const RectI &updateRect)  
-{  
-   doPositioning();
-   doProjection();
-   doAlignment();
+{
+   if (mAttachedTo == nullptr)
+      return;
 
-   Parent::onRender(offset, updateRect);  
+   // Must be in a TS Control
+   GuiTSCtrl* parent = dynamic_cast<GuiTSCtrl*>(getParent());
+   if (!parent)
+      return;
+
+   // Must have a connection and control object
+   GameConnection* conn = GameConnection::getConnectionToServer();
+   if (!conn)
+      return;
+   GameBase* control = dynamic_cast<GameBase*>(conn->getControlObject());
+   if (!control)
+      return;
+
+   // Get control camera info
+   MatrixF cam;
+   Point3F camPos;
+   VectorF camDir;
+   conn->getControlCameraTransform(0, &cam);
+   cam.getColumn(3, &camPos);
+   cam.getColumn(1, &camDir);
+
+   F32 camFovCos;
+   conn->getControlCameraFov(&camFovCos);
+   camFovCos = mCos(mDegToRad(camFovCos) / 2);
+
+   F32 mDistanceFade = 0.1f;
+
+   // Visible distance info & name fading
+   F32 visDistance = gClientSceneGraph->getVisibleDistance();
+   F32 visDistanceSqr = visDistance * visDistance;
+   F32 fadeDistance = visDistance * mDistanceFade;
+
+   // Collision info. We're going to be running LOS tests and we
+   // don't want to collide with the control object.
+   static U32 losMask = TerrainObjectType | ShapeBaseObjectType | StaticObjectType;
+   //control->disableCollision();
+
+   // Target pos to test, if it's a player run the LOS to his eye
+   // point, otherwise we'll grab the generic box center.
+   Point3F shapePos;
+   if (mAttachedToPlayer != nullptr)
+   {
+      if (mAttachedToPlayer != NULL && mTargetNodeName != StringTable->EmptyString())
+      {
+         MatrixF mat;
+         mAttachedToPlayer->getNodeTransform(mTargetNodeName, MatrixF::Identity, &mat);
+         mat.getColumn(3, &shapePos);
+      }
+   }
+   else
+   {
+      // Use the render transform instead of the box center
+      // otherwise it'll jitter.
+      MatrixF srtMat = mAttachedTo->getRenderTransform();
+      srtMat.getColumn(3, &shapePos);
+      shapePos.z += mAttachedTo->getRenderWorldBox().len_z();
+   }
+
+   VectorF shapeDir = shapePos - camPos;
+
+   // Test to see if it's in range
+   F32 shapeDist = shapeDir.lenSquared();
+   if (shapeDist == 0 || shapeDist > visDistanceSqr)
+      return;
+   shapeDist = mSqrt(shapeDist);
+
+   // Test to see if it's within our viewcone, this test doesn't
+   // actually match the viewport very well, should consider
+   // projection and box test.
+   shapeDir.normalize();
+   F32 dot = mDot(shapeDir, camDir);
+   /*if (dot < camFovCos)
+   {
+      if (mObjInview)
+         onObjectLeavesView_callback(mAttachedTo);
+      mObjInview = false;
+      return;
+   }
+   else
+   {
+      if (!mObjInview)
+         onObjectEntersView_callback(mAttachedTo);
+      mObjInview = true;
+   }*/
+   // Test to see if it's behind something, and we want to
+   // ignore anything it's mounted on when we run the LOS.
+   RayInfo info;
+   //mAttachedTo->disableCollision();
+   SceneObject* mount = mAttachedTo->getObjectMount();
+   //if (mount)
+   //   mount->disableCollision();
+   //bool los = !gClientContainer.castRay(camPos, shapePos, losMask, &info);
+  // mAttachedTo->enableCollision();
+  // if (mount)
+  //    mount->enableCollision();
+  // if (!los)
+  //    return;
+
+   // Project the shape pos into screen space and calculate
+   // the distance opacity used to fade the labels into the
+   // distance.
+   Point3F projPnt;
+   shapePos.z += (F32)mOffsetScreen.y;
+   if (!parent->project(shapePos, &projPnt))
+   {
+      if (mObjInview)
+         onObjectLeavesView_callback(mAttachedTo);
+      mObjInview = false;
+
+      if(mOnlyInView)
+         return;
+   }
+   else
+   {
+      if (!mObjInview)
+         onObjectEntersView_callback(mAttachedTo);
+      mObjInview = true;
+   }
+
+   if (!mOnlyInView && (projPnt.z < 0 || projPnt.z > 1))
+   {
+      projPnt.x = -projPnt.x;
+      projPnt.y = -projPnt.y;
+   }
+
+   F32 opacity = (shapeDist < fadeDistance) ? 1.0 :
+      1.0 - (shapeDist - fadeDistance) / (visDistance - fadeDistance);
+
+   mPtScreen = Point2I((S32)projPnt.x, (S32)projPnt.y);
+
+   // alignment  
+   Point2I offsetAlign;
+   switch (mHAlign)
+   {
+      default:
+      case horizCenter:
+         offsetAlign.x = -getBounds().extent.x / 2;
+         break;
+      case right:
+         offsetAlign.x = 0;
+         break;
+      case left:
+         offsetAlign.x = -getBounds().extent.x;
+         break;
+   }
+
+   switch (mVAlign)
+   {
+      default:
+      case vertCenter:
+         offsetAlign.y = -getBounds().extent.y / 2;
+         break;
+      case bottom:
+         offsetAlign.y = 0;
+         break;
+      case top:
+         offsetAlign.y = -getBounds().extent.y;
+         break;
+   }
+
+   RectI bounds = getBounds();
+   bounds.point = mPtScreen;
+   bounds.point += offsetAlign;
+
+   // adjust the position of the control to be within the viewport
+   if (bounds.point.x < mTSCtrl->getPosition().x)
+   {
+      bounds.point.x = mTSCtrl->getPosition().x;
+      mBoundsBleed.set(BLEEDLEFT);
+   }
+   if (bounds.point.y < mTSCtrl->getPosition().y)
+   {
+      bounds.point.y = mTSCtrl->getPosition().y;
+      mBoundsBleed.set(BLEEDTOP);
+   }
+   if (bounds.point.x + bounds.extent.x > mTSCtrl->getExtent().x)
+   {
+      bounds.point.x = mTSCtrl->getExtent().x - bounds.extent.x;
+      mBoundsBleed.set(BLEEDRIGHT);
+   }
+   if (bounds.point.y + bounds.extent.y > mTSCtrl->getExtent().y)
+   {
+      bounds.point.y = mTSCtrl->getExtent().y - bounds.extent.y;
+      mBoundsBleed.set(BLEEDBOTTOM);
+   }
+
+   if (mFrameTime->getElapsedMs() > 16)
+   {
+      if (mBoundsBleed.getMask() != NULL)
+         onProjectionBleedover_callback(mBoundsBleed);
+      mFrameTime->reset();
+   }
+
+   setBounds(bounds);
+
+   Parent::onRender(offset, updateRect);
 }  
-  
-void Gui3DProjectionCtrl::resizeDuringRender()  
-{  
-   doPositioning();  
-   doProjection ();  
-   doAlignment  ();  
-}  
-  
-  
-  
+
+void Gui3DProjectionCtrl::interpolateTick(F32 delta)
+{
+   if (!isAwake())
+      return;
+
+   Point2I ctrlPos = getPosition();
+
+   switch (mAnimationMode) 
+   {
+	   case animSingleBob:
+	   {
+	      F32 phase = mSin(mAnimationPos * M_PI_F * 2.0f);
+	      ctrlPos += Point2I(phase * mAnimDirScalar.x, phase * mAnimDirScalar.y);
+	      mAnimationPos += delta * mAnimationSpeed;
+	
+	      if (mAnimationPos >= 1.0f)
+	         mAnimationMode = animNone; // Reset to no animation after one cycle
+	   }
+	   break;
+	   case animLoopBob:
+	   {
+	      F32 phase = mSin(mAnimationPos * M_PI_F * 2.0f);
+	      ctrlPos += Point2I(phase * mAnimDirScalar.x, phase * mAnimDirScalar.y);
+	      mAnimationPos += delta * mAnimationSpeed;
+	   }
+	   break;
+	   default:
+	      break; // No animation
+   }
+
+   setPosition(ctrlPos);
+}
+
 bool Gui3DProjectionCtrl::onWake()  
 {  
    // walk up the GUI tree until we find a GuiTSCtrl.  
@@ -156,118 +447,6 @@ void Gui3DProjectionCtrl::onDeleteNotify(SimObject* obj)
   
 //-----------------------------------------------------------------------------  
   
-void Gui3DProjectionCtrl::doPositioning()  
-{  
-   if (mAttachedTo == NULL)  
-      return;  
-  
-   Point3F ptBase;   // the regular position of the object.  
-   Point3F ptEye;    // the render position of the eye node, if a player object.  
-   Point3F pt;       // combination of ptBase and ptEye.  
-  
-   MatrixF mat;      // utility  
-     
-   mAttachedTo->getRenderTransform().getColumn(3, &ptBase);  
-  
-   if (mAttachedToPlayer != NULL)  
-   {  
-      mAttachedToPlayer->getRenderEyeTransform(&mat);  
-      mat.getColumn(3, &ptEye);  
-   }  
-   else  
-   {  
-      ptEye = ptBase;  
-   }  
-     
-   // use some components from ptEye but other position from ptBase  
-   pt = ptBase;  
-   if (mUseEyePoint.x != 0)  
-   {  
-      pt.x = ptEye.x;  
-      pt.y = ptEye.y;  
-   }  
-   if (mUseEyePoint.y != 0)  
-   {  
-      pt.z = ptEye.z;  
-   }  
-  
-   // object-space offset  
-   Point3F offsetObj;  
-   QuatF quat(mAttachedTo->getRenderTransform());  
-   quat.mulP(mOffsetObject, &offsetObj);  
-   pt += offsetObj;  
-  
-  
-   // world-space offset  
-   pt += mOffsetWorld;  
-  
-   mPtWorld = pt;  
-}  
-  
-  
-void Gui3DProjectionCtrl::doProjection()  
-{  
-   if (!mTSCtrl)  
-      return;  
-  
-   Point3F pt;  
-  
-   if (!mTSCtrl->project(mPtWorld, &pt))  
-      return;  
-  
-   mPtProj.x = (S32)(pt.x + 0.5f);  
-   mPtProj.y = (S32)(pt.y + 0.5f);  
-}  
-  
-void Gui3DProjectionCtrl::doAlignment()  
-{  
-   // alignment  
-   Point2I offsetAlign;  
-   switch(mHAlign)  
-   {  
-   default:  
-   case center:  
-      offsetAlign.x = -getBounds().extent.x / 2;  
-      break;  
-   case min:  
-      offsetAlign.x = 0;  
-      break;  
-   case max:  
-      offsetAlign.x = -getBounds().extent.x;  
-      break;  
-   }  
-  
-   switch(mVAlign)  
-   {  
-   default:  
-   case center:  
-      offsetAlign.y = -getBounds().extent.y / 2;  
-      break;  
-   case min:  
-      offsetAlign.y = 0;  
-      break;  
-   case max:  
-      offsetAlign.y = -getBounds().extent.y;  
-      break;  
-   }  
-  
-   // projected point  
-   mPtScreen  = mPtProj;  
-  
-   // alignment offset  
-   mPtScreen += offsetAlign;  
-  
-   // screen offset  
-   mPtScreen += mOffsetScreen;  
-  
-// setTrgPosition(mPtScreen);  
-   RectI bounds = getBounds();
-   bounds.point = mPtScreen;
-   setBounds(bounds);  
-}  
-  
-//-----------------------------------------------------------------------------  
-  
 void Gui3DProjectionCtrl::setAttachedTo(SceneObject* obj)  
 {  
    if (obj == mAttachedTo)  
@@ -277,12 +456,34 @@ void Gui3DProjectionCtrl::setAttachedTo(SceneObject* obj)
       clearNotify(mAttachedTo);  
   
    mAttachedTo       = obj;  
-   mAttachedToPlayer = dynamic_cast<Player*>(obj);  
+   mAttachedToPlayer = dynamic_cast<Player*>(obj);
   
    if (mAttachedTo)  
       deleteNotify(mAttachedTo);  
-}  
-  
+}
+
+Point2I Gui3DProjectionCtrl::getAttachedObjProjectPos()
+{
+   if(!mAttachedTo)
+      return Point2I(0,0);
+
+   Point3F shapePos = mAttachedTo->getPosition();
+   shapePos.z += (F32)mOffsetScreen.y;
+   Point3F projPnt;
+   if (!mTSCtrl->project(shapePos, &projPnt))
+   {
+      if(mOnlyInView)
+         return Point2I(0,0);
+   }
+
+   return Point2I((S32)projPnt.x, (S32)projPnt.y);
+}
+
+void Gui3DProjectionCtrl::playAnimation()
+{
+   mAnimationPos = 0.0f;
+}
+
 DefineEngineMethod(Gui3DProjectionCtrl, setAttachedTo, void, (SceneObject* target), (nullAsType<SceneObject*>()), "(object)")
 {
    if(target)
@@ -296,4 +497,34 @@ DefineEngineMethod(Gui3DProjectionCtrl, getAttachedTo, S32, (),, "()")
       return 0;  
    else  
       return obj->getId();  
-}  
+}
+
+DefineEngineMethod(Gui3DProjectionCtrl, setAttachedToByID, void, (S32 mTargetId), (0), "(object)")
+{
+   SceneObject* target = NULL;
+
+   // Must have a connection and player control object
+   GameConnection* conn = GameConnection::getConnectionToServer();
+   if (!conn)
+      return;
+
+   if (mTargetId != -1)
+   {
+      target = dynamic_cast<SceneObject*>(conn->resolveGhost(mTargetId));
+   }
+
+   if (target)
+      object->setAttachedTo(target);
+}
+
+DefineEngineMethod(Gui3DProjectionCtrl, getAttachedObjProjectPos, Point2I, (), , "")
+{
+   return object->getAttachedObjProjectPos();
+}
+
+
+DefineEngineMethod(Gui3DProjectionCtrl, playAnimation, void, (), , "")
+{
+   return object->playAnimation();
+}
+

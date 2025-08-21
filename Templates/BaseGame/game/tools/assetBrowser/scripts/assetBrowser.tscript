@@ -2139,10 +2139,17 @@ function AssetBrowser::navigateTo(%this, %address, %historyNav)
    //Sanitize
    if(startsWith(%address, "/"))
       %address = strreplace(%address, "/", "");
+<<<<<<< Updated upstream
       
    // Safety
    %address = strreplace(%address, "//", "/");
       
+=======
+	
+	//	Safety
+	%address = strreplace(%address, "//","/");
+     
+>>>>>>> Stashed changes
    //Don't bother navigating if it's to the place we already are
    if(%this.dirHandler.currentAddress !$= %address)
    {

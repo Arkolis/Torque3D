@@ -82,10 +82,10 @@ IMPLEMENT_CONOBJECT(VehicleData);
 
 ConsoleDocClass( VehicleData,
    "@brief Base properties shared by all Vehicles (FlyingVehicle, HoverVehicle, "
-   "WheeledVehicle).\n\n"
+   "WheeledVehicle, SpaceVehicle).\n\n"
    "This datablock defines properties shared by all Vehicle types, but should "
    "not be instantiated directly. Instead, set the desired properties in the "
-   "FlyingVehicleData, HoverVehicleData or WheeledVehicleData datablock.\n"
+   "FlyingVehicleData, HoverVehicleData, WheeledVehicleData, or SpaceVehilceData datablock.\n"
 
    "@section VehicleData_damage Damage\n\n"
 
@@ -362,10 +362,10 @@ IMPLEMENT_CONOBJECT(Vehicle);
 
 ConsoleDocClass( Vehicle,
    "@brief Base functionality shared by all Vehicles (FlyingVehicle, HoverVehicle, "
-   "WheeledVehicle).\n\n"
+   "WheeledVehicle, SpaceVehicle).\n\n"
    "This object implements functionality shared by all Vehicle types, but should "
-   "not be instantiated directly. Create a FlyingVehicle, HoverVehicle, or "
-   "WheeledVehicle instead.\n"
+   "not be instantiated directly. Create a FlyingVehicle, HoverVehicle,"
+   "SpaceVehicle, or WheeledVehicle instead.\n"
    "@note The model used for any Vehicle must include a collision mesh at detail "
    "size -1.\n"
    "@ingroup Vehicles\n"
@@ -395,7 +395,7 @@ Vehicle::Vehicle()
    mRigid.angMomentum.set(0, 0, 0);
    mContacts.clear();
 
-   mSteering.set(0,0);
+   mSteering.set(0,0,0);
    mThrottle = 0;
    mJetting = false;
 
@@ -758,6 +758,9 @@ void Vehicle::updateMove(const Move* move)
       F32 p = move->pitch;
       mSteering.y = mClampF(mSteering.y + p,-mDataBlock->maxSteeringAngle,
                             mDataBlock->maxSteeringAngle);
+      F32 r = move->roll;
+      mSteering.z = mClampF(mSteering.z + r, -mDataBlock->maxSteeringAngle,
+         mDataBlock->maxSteeringAngle);
    }
    else {
       mSteering.x = 0;
@@ -766,16 +769,18 @@ void Vehicle::updateMove(const Move* move)
 
    // Steering return
    if(mDataBlock->steeringReturn > 0.0f &&
-      (!mDataBlock->powerSteering || (move->yaw == 0.0f && move->pitch == 0.0f)))
+      (!mDataBlock->powerSteering || (move->yaw == 0.0f && move->pitch == 0.0f && move->roll == 0.0f)))
    {
-      Point2F returnAmount(mSteering.x * mDataBlock->steeringReturn * TickSec,
-                           mSteering.y * mDataBlock->steeringReturn * TickSec);
+      Point3F returnAmount(mSteering.x * mDataBlock->steeringReturn * TickSec,
+                           mSteering.y * mDataBlock->steeringReturn * TickSec,
+                           mSteering.z * mDataBlock->steeringReturn * TickSec);
       if(mDataBlock->steeringReturnSpeedScale > 0.0f)
       {
          Point3F vel;
          mWorldToObj.mulV(getVelocity(), &vel);
-         returnAmount += Point2F(mSteering.x * vel.y * mDataBlock->steeringReturnSpeedScale * TickSec,
-                                 mSteering.y * vel.y * mDataBlock->steeringReturnSpeedScale * TickSec);
+         returnAmount += Point3F(mSteering.x * vel.y * mDataBlock->steeringReturnSpeedScale * TickSec,
+                                 mSteering.y * vel.y * mDataBlock->steeringReturnSpeedScale * TickSec,
+                                 mSteering.z * vel.z * mDataBlock->steeringReturnSpeedScale * TickSec);
       }
       mSteering -= returnAmount;
    }

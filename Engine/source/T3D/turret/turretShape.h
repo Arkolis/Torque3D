@@ -42,6 +42,7 @@ public:
       FireTogether,              ///< All weapons fire under trigger 0
       GroupedFire,               ///< Weapon mounts 0,2 fire under trigger 0, mounts 1,3 fire under trigger 1
       IndividualFire,            ///< Each weapon mount fires under its own trigger 0-3
+      AltGroupedFire,              ///< All weapons fire under trigger 0
       NumFireLinkTypeBits = 2
    };
 

@@ -58,7 +58,6 @@ static U32 sClientCollisionMask =
 static F32 sMinSquealVolume = 0.05f;
 static F32 sIdleEngineVolume = 0.2f;
 
-
 //----------------------------------------------------------------------------
 // Vehicle Tire Data Block
 //----------------------------------------------------------------------------
@@ -113,7 +112,6 @@ void WheeledVehicleTire::initPersistFields()
 {
    docsURL;
    INITPERSISTFIELD_SHAPEASSET_REFACTOR(Shape, WheeledVehicleTire, "The shape to use for the wheel.");
-
    addFieldV( "mass", TypeRangedF32, Offset(mass, WheeledVehicleTire), &CommonValidators::PositiveFloat,
       "The mass of the wheel.\nCurrently unused." );
    addFieldV( "radius", TypeRangedF32, Offset(radius, WheeledVehicleTire), &CommonValidators::PositiveFloat,
@@ -290,6 +288,12 @@ ConsoleDocClass( WheeledVehicleData,
    "@ingroup Vehicles\n"
 );
 
+//steering Type
+ImplementEnumType(mSteerType, "@brief How the steering type is handled.\n\n")
+   {WheeledVehicleData::Standard, "Standard", "Set of tires turn as in a car, truck, etc.\n"},
+   {WheeledVehicleData::Differential, "Differential", "Wheels power in different direction to initiate tank like steering." },
+EndImplementEnumType;
+
 typedef WheeledVehicleData::Sounds WheeledVehicleSoundsEnum;
 DefineEnumType(WheeledVehicleSoundsEnum);
 
@@ -304,6 +308,9 @@ EndImplementEnumType;
 WheeledVehicleData::WheeledVehicleData()
 {
    tireEmitter = 0;
+   // Steering type default
+   steeringType = Standard;
+   maxBodyTilt = 0;
    maxWheelSpeed = 40;
    engineTorque = 1;
    engineBrake = 1;
@@ -464,6 +471,14 @@ void WheeledVehicleData::initPersistFields()
    endGroup("Sounds");
 
    addGroup("Steering");
+   addField("steeringType", TYPEID< WheeledVehicleData::SteerType >(), Offset(steeringType, WheeledVehicleData),
+      "@brief Set how the wheeled vehicle steers.\n\n"
+      "<li> Standard: Standard vehicle type steering, with wheels that physically turn in the direction.\n"
+      "<li> Differential: Differential (Tank like) steering where the opposite wheels turn in different directions to simulate turning."
+      "@see mSteerType");
+   addFieldV("maxBodyTilt", TypeRangedF32, Offset(maxBodyTilt, WheeledVehicleData), &CommonValidators::PositiveFloat,
+      "@brief Maximum tilt of the body.\n\n"
+      "This caps the maximum tilt of the vehicle for leaning at speed. Think Motorcycles.");
    addFieldV("maxWheelSpeed", TypeRangedF32, Offset(maxWheelSpeed, WheeledVehicleData), &CommonValidators::PositiveFloat,
       "@brief Maximum linear velocity of each wheel.\n\n"
       "This caps the maximum speed of the vehicle." );
@@ -498,6 +513,8 @@ void WheeledVehicleData::packData(BitStream* stream)
       PACKDATA_SOUNDASSET_ARRAY(WheeledVehicleSounds, i);
    }
 
+   stream->writeInt(steeringType,SteerTypeBits);
+   stream->write(maxBodyTilt);
    stream->write(maxWheelSpeed);
    stream->write(engineTorque);
    stream->write(engineBrake);
@@ -517,7 +534,8 @@ void WheeledVehicleData::unpackData(BitStream* stream)
    {
       UNPACKDATA_SOUNDASSET_ARRAY(WheeledVehicleSounds, i);
    }
-
+   steeringType = (SteerType)stream->readInt(SteerTypeBits);
+   stream->read(&maxBodyTilt);
    stream->read(&maxWheelSpeed);
    stream->read(&engineTorque);
    stream->read(&engineBrake);
@@ -548,7 +566,7 @@ WheeledVehicle::WheeledVehicle()
    mSquealSound = NULL;
    mTailLightThread = 0;
    mSteeringThread = 0;
-
+      
    for (S32 i = 0; i < WheeledVehicleData::MaxWheels; i++) {
       mWheel[i].springThread = 0;
       mWheel[i].Dy = mWheel[i].Dx = 0;
@@ -638,6 +656,8 @@ bool WheeledVehicle::onNewDataBlock(GameBaseData* dptr, bool reload)
    else
       mRigid.setObjectInertia(mObjBox.maxExtents - mObjBox.minExtents);
 
+
+
    // Initialize the wheels...
    for (S32 i = 0; i < mDataBlock->wheelCount; i++) 
    {
@@ -656,9 +676,22 @@ bool WheeledVehicle::onNewDataBlock(GameBaseData* dptr, bool reload)
       wheel->springThread = 0;
       wheel->emitter = 0;
 
-      // Steering on the front tires by default
-      if (wheel->data->pos.y > 0)
-         wheel->steering = 1;
+      
+      switch (mDataBlock->steeringType)
+      {
+         case WheeledVehicleData::Standard:
+         {
+            // Steering on the front tires by default
+            if (wheel->data->pos.y > 0)
+               wheel->steering = 1;
+            break;
+         }
+         case WheeledVehicleData::Differential:
+         {
+            //Lets not default anything to steer on differential vehicles.
+            break;
+         }
+      }
 
       // Build wheel animation threads
       if (wheel->data->springSequence != -1) {
@@ -766,7 +799,7 @@ void WheeledVehicle::getWheelInstAndTransform( U32 index, TSShapeInstance** inst
    world.scale( mObjScale );
 
    // Steering & spring extension
-   MatrixF hub(EulerF(0,0,mSteering.x * wheel->steering));
+   MatrixF hub(EulerF(0, 0, mSteering.x * wheel->steering));
    Point3F pos = wheel->data->pos;
    pos.z -= wheel->spring->length * wheel->extension;
    hub.setColumn(3,pos);
@@ -821,7 +854,7 @@ void WheeledVehicle::advanceTime(F32 dt)
 
    // Stick the wheels to the ground.  This is purely so they look
    // good while the vehicle is being interpolated.
-   //extendWheels();
+   extendWheels(isClientObject());
 
    // Update wheel angular position and slip, this is a client visual
    // feature only, it has no affect on the physics.
@@ -855,7 +888,7 @@ void WheeledVehicle::advanceTime(F32 dt)
    // and time 0.5 is straight ahead.
    if (mSteeringThread) {
       F32 t = (mSteering.x * mFabs(mSteering.x)) / mDataBlock->maxSteeringAngle;
-      mShapeInstance->setPos(mSteeringThread,0.5 - t * 0.5);
+      mShapeInstance->setPos(mSteeringThread, 0.5 - t * 0.5);
    }
 
    // Animate the tail light. The direction of the thread is
@@ -889,13 +922,29 @@ void WheeledVehicle::updateForces(F32 dt)
    currMatrix.getColumn(2,&bz);
 
    // Steering angles from current steering wheel position
-   F32 quadraticSteering = -(mSteering.x * mFabs(mSteering.x));
-   F32 cosSteering,sinSteering;
+   F32 quadraticSteering = mFabs(0.0f);
+   F32 cosSteering, sinSteering;
+
+   //This changes the steering, but not visually.
+   switch (mDataBlock->steeringType)
+   {
+      case WheeledVehicleData::Standard:
+      {
+         quadraticSteering = -(mSteering.x * mFabs(mSteering.x));
+         break;
+      }
+      case WheeledVehicleData::Differential:
+      {
+         //Do nothing.
+         break;
+      }
+   }
    mSinCos(quadraticSteering, sinSteering, cosSteering);
 
    // Calculate Engine and brake torque values used later by in
    // wheel calculations.
    F32 engineTorque,brakeVel;
+
    if (mBraking) 
    {
       brakeVel = (mDataBlock->brakeTorque / aMomentum) * dt;
@@ -903,20 +952,22 @@ void WheeledVehicle::updateForces(F32 dt)
    }
    else 
    {
-      if (mThrottle) 
+      if (mThrottle)
       {
          engineTorque = mDataBlock->engineTorque * mThrottle;
          brakeVel = 0;
+
          // Double the engineTorque to help out the jets
          if (mThrottle > 0 && mJetting)
             engineTorque *= 2;
       }
-      else 
+      else
       {
          // Engine brake.
          brakeVel = (mDataBlock->engineBrake / aMomentum) * dt;
          engineTorque = 0;
       }
+      
    }
 
    // Integrate forces, we'll do this ourselves here instead of
@@ -1097,17 +1148,36 @@ void WheeledVehicle::updateForces(F32 dt)
 
       // Adjust the wheel's angular velocity based on engine torque
       // and tire deformation forces.
-      if (wheel->powered) 
+      if (wheel->powered)
       {
          F32 maxAvel = mDataBlock->maxWheelSpeed / wheel->tire->radius;
          wheel->torqueScale = (mFabs(wheel->avel) > maxAvel) ? 0 :
             1 - (mFabs(wheel->avel) / maxAvel);
       }
       else
+      {
          wheel->torqueScale = 0;
-      wheel->avel += (((wheel->torqueScale * engineTorque) - Fy *
-         wheel->tire->radius) / aMomentum) * dt;
+      }
 
+      switch (mDataBlock->steeringType)
+      {
+         //Switch the wheel torque based on direction.
+         case WheeledVehicleData::Standard:
+         {
+            wheel->avel += (((wheel->torqueScale * engineTorque) - Fy *
+               wheel->tire->radius) / aMomentum) * dt;
+         }
+         case WheeledVehicleData::Differential:
+         {
+            F32 b = mLerp(mSteering.x, mSteering.x * 0.01f, mThrottle);
+            F32 c = mLerp(-mSteering.x, -mSteering.x * 0.0f, mThrottle);
+            wheel->avel += (wheel->data->pos.x > 0) ? (c) : (((wheel->torqueScale * engineTorque) - Fy *
+               wheel->tire->radius) / aMomentum) * dt;
+            wheel->avel += (wheel->data->pos.x < 0) ? (b) : (((wheel->torqueScale * engineTorque) - Fy *
+               wheel->tire->radius) / aMomentum) * dt;
+         }
+      }
+      
       // Adjust the wheel's angular velocity based on brake torque.
       // This is done after avel update to make sure we come to a
       // complete stop.
@@ -1160,49 +1230,45 @@ void WheeledVehicle::updateForces(F32 dt)
 */
 void WheeledVehicle::extendWheels(bool clientHack)
 {
-   PROFILE_SCOPE( WheeledVehicle_ExtendWheels );
-
+   PROFILE_SCOPE(WheeledVehicle_ExtendWheels);
    disableCollision();
-
    MatrixF currMatrix;
-   
-   if(clientHack)
+
+   if (clientHack)
       currMatrix = getRenderTransform();
    else
       mRigid.getTransform(&currMatrix);
-   
 
    // Does a single ray cast down for now... this will have to be
    // changed to something a little more complicated to avoid getting
    // stuck in cracks.
    Wheel* wend = &mWheel[mDataBlock->wheelCount];
-   for (Wheel* wheel = mWheel; wheel < wend; wheel++) 
+   for (Wheel* wheel = mWheel; wheel < wend; wheel++)
    {
-      if (wheel->tire && wheel->spring) 
+      if (wheel->tire && wheel->spring)
       {
          wheel->extension = 1;
-
          // The ray is cast from the spring mount point to the tip of
          // the tire.  If there is a collision the spring extension is
          // adjust to remove the tire radius.
-         Point3F sp,vec;
-         currMatrix.mulP(wheel->data->pos,&sp);
-         currMatrix.mulV(VectorF(0,0,-wheel->spring->length),&vec);
+         Point3F sp, vec;
+         currMatrix.mulP(wheel->data->pos, &sp);
+         currMatrix.mulV(VectorF(0, 0, -wheel->spring->length), &vec);
          F32 ts = wheel->tire->radius / wheel->spring->length;
          Point3F ep = sp + (vec * (1 + ts));
-         ts = ts / (1+ts);
-
+         ts = ts / (1 + ts);
          RayInfo rInfo;
-         if (mContainer->castRay(sp, ep, sClientCollisionMask & ~PlayerObjectType, &rInfo)) 
+         if (mContainer->castRay(sp, ep, sClientCollisionMask & ~PlayerObjectType, &rInfo))
          {
-            wheel->surface.contact  = true;
-            wheel->extension = (rInfo.t < ts)? 0: (rInfo.t - ts) / (1 - ts);
-            wheel->surface.normal   = rInfo.normal;
-            wheel->surface.pos      = rInfo.point;
+            wheel->surface.contact = true;
+            wheel->extension = (rInfo.t < ts) ? 0 : (rInfo.t - ts) / (1 - ts);
+            wheel->surface.normal = rInfo.normal;
+            wheel->surface.pos = rInfo.point;
             wheel->surface.material = rInfo.material;
-            wheel->surface.object   = rInfo.object;
+            wheel->surface.object = rInfo.object;
+            wheel->slipping = false;
          }
-         else 
+         else
          {
             wheel->surface.contact = false;
             wheel->slipping = true;
@@ -1436,7 +1502,8 @@ void WheeledVehicle::prepBatchRender(SceneRenderState* state, S32 mountedImageIn
          GFX->pushWorldMatrix();
 
          // Steering & spring extension
-         MatrixF hub(EulerF(0,0,mSteering.x * wheel->steering));
+         MatrixF hub = MatrixF(EulerF(0, 0, mSteering.x * wheel->steering));
+         
          Point3F pos = wheel->data->pos;
          pos.z -= wheel->spring->length * wheel->extension;
          hub.setColumn(3,pos);
@@ -1471,39 +1538,40 @@ void WheeledVehicle::prepBatchRender(SceneRenderState* state, S32 mountedImageIn
 
 //----------------------------------------------------------------------------
 
-void WheeledVehicle::writePacketData(GameConnection *connection, BitStream *stream)
+void WheeledVehicle::writePacketData(GameConnection* connection, BitStream* stream)
 {
    Parent::writePacketData(connection, stream);
    stream->writeFlag(mBraking);
 
-   Wheel* wend = &mWheel[mDataBlock->wheelCount];
-   for (Wheel* wheel = mWheel; wheel < wend; wheel++) 
-   {
-      stream->write(wheel->avel);
-      stream->write(wheel->Dy);
-      stream->write(wheel->Dx);
-      stream->writeFlag(wheel->slipping);
-   }
 }
 
-void WheeledVehicle::readPacketData(GameConnection *connection, BitStream *stream)
+void WheeledVehicle::readPacketData(GameConnection* connection, BitStream* stream)
 {
    Parent::readPacketData(connection, stream);
    mBraking = stream->readFlag();
 
    Wheel* wend = &mWheel[mDataBlock->wheelCount];
-   for (Wheel* wheel = mWheel; wheel < wend; wheel++) 
+
+   for (Wheel* wheel = mWheel; wheel < wend; wheel++)
    {
-      stream->read(&wheel->avel);
-      stream->read(&wheel->Dy);
-      stream->read(&wheel->Dx);
-      wheel->slipping = stream->readFlag();
+      if (wheel->tire && wheel->spring) {
+         // Update angular position
+         wheel->apos += (wheel->avel) / M_2PI;
+         wheel->apos -= mFloor(wheel->apos);
+         if (wheel->apos < 0)
+            wheel->apos = 1 - wheel->apos;
+      }
    }
 
    // Rigid state is transmitted by the parent...
-   setPosition(mRigid.linPosition,mRigid.angPosition);
+   setPosition(mRigid.linPosition, mRigid.angPosition);
    mDelta.pos = mRigid.linPosition;
    mDelta.rot[1] = mRigid.angPosition;
+
+   // Stick the wheels to the ground.  This is purely so they look
+   // good while the vehicle is being interpolated.
+   extendWheels(isClientObject());
+   updateWheelThreads();
 }
 
 

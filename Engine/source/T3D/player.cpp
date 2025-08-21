@@ -453,6 +453,7 @@ PlayerData::PlayerData()
    groundImpactShakeAmp.set( 20.0f, 20.0f, 20.0f );
    groundImpactShakeDuration = 1.0f;
    groundImpactShakeFalloff = 10.0f;
+   ragdollDelay = 0.0f;
 
    // Air control
    airControl = 0.0f;
@@ -1111,7 +1112,7 @@ void PlayerData::initPersistFields()
       addFieldV( "groundImpactShakeFalloff", TypeRangedF32, Offset(groundImpactShakeFalloff, PlayerData), &CommonValidators::PositiveFloat,
          "@brief Falloff factor of the camera shake effect after falling.\n\n"
          "This is how to fade the camera shake over the duration.\n");
-
+      addField("ragdollDelay", TypeF32, Offset(ragdollDelay, PlayerData));
    endGroup( "Interaction: Ground Impact" );
 
    addGroup( "Physics" );
@@ -1317,6 +1318,7 @@ void PlayerData::packData(BitStream* stream)
    stream->write(groundImpactShakeAmp.z);
    stream->write(groundImpactShakeDuration);
    stream->write(groundImpactShakeFalloff);
+   stream->write(ragdollDelay);
 
    // Air control
    stream->write(airControl);
@@ -1497,6 +1499,7 @@ void PlayerData::unpackData(BitStream* stream)
    stream->read(&groundImpactShakeAmp.z);
    stream->read(&groundImpactShakeDuration);
    stream->read(&groundImpactShakeFalloff);
+   stream->read(&ragdollDelay);
 
    // Air control
    stream->read(&airControl);
@@ -2836,9 +2839,9 @@ void Player::updateMove(const Move* move)
       }
 
       // Cancel any script driven animations if we are going to move.
-      if (moveVec.x + moveVec.y + moveVec.z != 0.0f &&
+      if (mJumpSurfaceLastContact > mDataBlock->ragdollDelay && (moveVec.x + moveVec.y + moveVec.z != 0.0f &&
           (mActionAnimation.action >= PlayerData::NumTableActionAnims
-               || mActionAnimation.action == PlayerData::LandAnim))
+               || mActionAnimation.action == PlayerData::LandAnim)))
          mActionAnimation.action = PlayerData::NullAnimation;
    }
    else

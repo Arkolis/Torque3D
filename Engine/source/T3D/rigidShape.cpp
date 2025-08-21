@@ -1252,8 +1252,12 @@ bool RigidShape::updateCollision(F32 dt)
    mConvex.transform = &mat;
    mRigid.getTransform(&mat);
    cmat = mConvex.getTransform();
-
+   //Wheel fix attempt
+   SceneObject* mounted;
+   for (mounted = getMountList(); mounted; mounted = mounted->getMountLink())
+      mounted->disableCollision();
    mCollisionList.clear();
+   
    CollisionState *state = mConvex.findClosestState(cmat, getScale(), mDataBlock->collisionTol);
    if (state && state->mDist <= mDataBlock->collisionTol) 
    {
@@ -1263,6 +1267,10 @@ bool RigidShape::updateCollision(F32 dt)
 
    // Resolve collisions
    bool collided = resolveCollision(mRigid,mCollisionList, dt);
+
+   for (mounted = getMountList(); mounted; mounted = mounted->getMountLink())
+      mounted->enableCollision();
+
    return collided;
 }
 
@@ -1682,7 +1690,7 @@ void RigidShape::initPersistFields()
    docsURL;
    addField("disableMove", TypeBool, Offset(mDisableMove, RigidShape),
       "When this flag is set, the vehicle will ignore throttle changes.");
-   addField("isAtRest", TypeBool, Offset(mRigid.atRest, RigidShape),
+   addProtectedField("isAtRest", TypeBool, Offset(mRigid.atRest, RigidShape), &defaultProtectedNotSetFn, &defaultProtectedGetFn,
       "Debug read of the rest state. do not set");   
    Parent::initPersistFields();
 }

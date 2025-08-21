@@ -357,6 +357,7 @@ struct PlayerData: public ShapeBaseData /*protected AssetPtrCallback < already i
 
    ParticleEmitterData* splashEmitterList[NUM_SPLASH_EMITTERS];
    S32 splashEmitterIDList[NUM_SPLASH_EMITTERS];
+   F32 ragdollDelay;
    /// @}
 
    //

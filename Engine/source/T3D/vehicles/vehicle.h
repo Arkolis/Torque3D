@@ -98,7 +98,7 @@ class Vehicle : public RigidShape
    SFXSource* mWakeSound;
 
    // Control
-   Point2F mSteering;
+   Point3F mSteering;
    F32 mThrottle;
    bool mJetting;
    GFXStateBlockRef  mSolidSB;
@@ -148,7 +148,7 @@ public:
    bool onAdd() override;
    void onRemove() override;
 
-   Point2F getSteering() { return mSteering; };
+   Point3F getSteering() { return mSteering; };
    F32 getThrottle() { return mThrottle;};
 
    /// Interpolates between move ticks @see processTick

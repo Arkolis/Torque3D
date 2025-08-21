@@ -122,10 +122,19 @@ struct WheeledVehicleData: public VehicleData
       MaxSounds,
    };
 
+   enum SteerType
+   {
+      Standard,    //Standard turning
+      Differential, //tank
+      SteerTypeBits = 1
+   };
+   SteerType steeringType;
+
    DECLARE_SOUNDASSET_ARRAY(WheeledVehicleData, WheeledVehicleSounds, Sounds::MaxSounds);
 
    ParticleEmitterData* tireEmitter;
 
+   F32 maxBodyTilt;              //Motorcycles? to use in future.
    F32 maxWheelSpeed;            // Engine torque is scale based on wheel speed
    F32 engineTorque;             // Engine force controlled through throttle
    F32 engineBrake;              // Break force applied when throttle is 0
@@ -156,6 +165,8 @@ struct WheeledVehicleData: public VehicleData
    void unpackData(BitStream* stream) override;
 };
 
+typedef WheeledVehicleData::SteerType mSteerType;
+DefineEnumType( mSteerType );
 
 //----------------------------------------------------------------------------
 
@@ -177,7 +188,7 @@ class WheeledVehicle: public Vehicle
    SFXSource* mEngineSound;
    SFXSource* mSquealSound;
 
-   struct Wheel 
+   struct Wheel
    {
       WheeledVehicleTire *tire;
       WheeledVehicleSpring *spring;
@@ -207,6 +218,7 @@ class WheeledVehicle: public Vehicle
       F32 slip;               // Amount of wheel slip (0-1)
       SimObjectPtr<ParticleEmitter> emitter;
    };
+
    Wheel mWheel[WheeledVehicleData::MaxWheels];
    TSThread* mSteeringThread;
 
