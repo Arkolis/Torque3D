@@ -142,11 +142,7 @@ void TurretShapeData::initPersistFields()
          "@brief Should the turret allow only z rotations.\n\n"
          "True indicates that the turret may only be rotated on its z axis, just like the Item class.  "
          "This keeps the turret always upright regardless of the surface it lands on.\n");
-<<<<<<< HEAD
-      addFieldV("maxHeading", TypeRangedF32,       Offset(maxHeading,         TurretShapeData), &CommonValidators::DegreeRangeHalf,
-=======
       addFieldV("maxHeading", TypeRangedF32,       Offset(maxHeading,         TurretShapeData), &CommonValidators::PosDegreeRangeHalf,
->>>>>>> 2af8bf25d5f4ce9086e59e93f6a50e1c84edf32f
          "@brief Maximum number of degrees to rotate from center.\n\n"
          "A value of 180 or more degrees indicates the turret may rotate completely around.\n");
       addFieldV("minPitch", TypeRangedF32,       Offset(minPitch,           TurretShapeData), &CommonValidators::PosDegreeRangeQuarter,

@@ -126,7 +126,7 @@ struct WheeledVehicleData: public VehicleData
    {
       Standard,    //Standard turning
       Differential, //tank
-      SteerTypeBits = 1
+      SteerTypeBits = 2
    };
    SteerType steeringType;
 
@@ -165,8 +165,8 @@ struct WheeledVehicleData: public VehicleData
    void unpackData(BitStream* stream) override;
 };
 
-typedef WheeledVehicleData::SteerType mSteerType;
-DefineEnumType( mSteerType );
+typedef WheeledVehicleData::SteerType WheeledVehiclemSteerType;
+DefineEnumType(WheeledVehiclemSteerType);
 
 //----------------------------------------------------------------------------
 

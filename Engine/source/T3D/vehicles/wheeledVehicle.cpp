@@ -289,9 +289,9 @@ ConsoleDocClass( WheeledVehicleData,
 );
 
 //steering Type
-ImplementEnumType(mSteerType, "@brief How the steering type is handled.\n\n")
-   {WheeledVehicleData::Standard, "Standard", "Set of tires turn as in a car, truck, etc.\n"},
-   {WheeledVehicleData::Differential, "Differential", "Wheels power in different direction to initiate tank like steering." },
+ImplementEnumType(WheeledVehiclemSteerType, "@brief How the steering type is handled.\n\n")
+   {WheeledVehicleData::Standard,      "Standard", "Set of tires turn as in a car, truck, etc.\n"},
+   {WheeledVehicleData::Differential,  "Differential", "Wheels power in different direction to initiate tank like steering." },
 EndImplementEnumType;
 
 typedef WheeledVehicleData::Sounds WheeledVehicleSoundsEnum;
@@ -473,8 +473,8 @@ void WheeledVehicleData::initPersistFields()
    addGroup("Steering");
    addField("steeringType", TYPEID< WheeledVehicleData::SteerType >(), Offset(steeringType, WheeledVehicleData),
       "@brief Set how the wheeled vehicle steers.\n\n"
-      "<li> Standard: Standard vehicle type steering, with wheels that physically turn in the direction.\n"
-      "<li> Differential: Differential (Tank like) steering where the opposite wheels turn in different directions to simulate turning."
+      "<ul><li> Standard: Standard vehicle type steering, with wheels that physically turn in the direction.</li>"
+      "<li> Differential: Differential (Tank like) steering where the opposite wheels turn in different directions to simulate turning.</li></ul>"
       "@see mSteerType");
    addFieldV("maxBodyTilt", TypeRangedF32, Offset(maxBodyTilt, WheeledVehicleData), &CommonValidators::PositiveFloat,
       "@brief Maximum tilt of the body.\n\n"
@@ -1166,6 +1166,7 @@ void WheeledVehicle::updateForces(F32 dt)
          {
             wheel->avel += (((wheel->torqueScale * engineTorque) - Fy *
                wheel->tire->radius) / aMomentum) * dt;
+            break;
          }
          case WheeledVehicleData::Differential:
          {
@@ -1175,6 +1176,7 @@ void WheeledVehicle::updateForces(F32 dt)
                wheel->tire->radius) / aMomentum) * dt;
             wheel->avel += (wheel->data->pos.x < 0) ? (b) : (((wheel->torqueScale * engineTorque) - Fy *
                wheel->tire->radius) / aMomentum) * dt;
+            break;
          }
       }
       
