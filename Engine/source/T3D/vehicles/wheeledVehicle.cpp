@@ -310,7 +310,7 @@ WheeledVehicleData::WheeledVehicleData()
    tireEmitter = 0;
    // Steering type default
    steeringType = Standard;
-   maxBodyTilt = 0;
+   BodyTilt = false;
    maxWheelSpeed = 40;
    engineTorque = 1;
    engineBrake = 1;
@@ -476,9 +476,8 @@ void WheeledVehicleData::initPersistFields()
       "<ul><li> Standard: Standard vehicle type steering, with wheels that physically turn in the direction.</li>"
       "<li> Differential: Differential (Tank like) steering where the opposite wheels turn in different directions to simulate turning.</li></ul>"
       "@see mSteerType");
-   addFieldV("maxBodyTilt", TypeRangedF32, Offset(maxBodyTilt, WheeledVehicleData), &CommonValidators::PositiveFloat,
-      "@brief Maximum tilt of the body.\n\n"
-      "This caps the maximum tilt of the vehicle for leaning at speed. Think Motorcycles.");
+   addFieldV("BodyTilt", TypeRangedF32, Offset(BodyTilt, WheeledVehicleData), &CommonValidators::PositiveFloat,
+      "@brief Enables the speed based tilting animation/blends & reduces programatic wheel steering at speed (WIP).");
    addFieldV("maxWheelSpeed", TypeRangedF32, Offset(maxWheelSpeed, WheeledVehicleData), &CommonValidators::PositiveFloat,
       "@brief Maximum linear velocity of each wheel.\n\n"
       "This caps the maximum speed of the vehicle." );
@@ -514,7 +513,7 @@ void WheeledVehicleData::packData(BitStream* stream)
    }
 
    stream->writeInt(steeringType,SteerTypeBits);
-   stream->write(maxBodyTilt);
+   stream->write(BodyTilt);
    stream->write(maxWheelSpeed);
    stream->write(engineTorque);
    stream->write(engineBrake);
@@ -535,7 +534,7 @@ void WheeledVehicleData::unpackData(BitStream* stream)
       UNPACKDATA_SOUNDASSET_ARRAY(WheeledVehicleSounds, i);
    }
    steeringType = (SteerType)stream->readInt(SteerTypeBits);
-   stream->read(&maxBodyTilt);
+   stream->read(&BodyTilt);
    stream->read(&maxWheelSpeed);
    stream->read(&engineTorque);
    stream->read(&engineBrake);

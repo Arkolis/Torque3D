@@ -134,7 +134,7 @@ struct WheeledVehicleData: public VehicleData
 
    ParticleEmitterData* tireEmitter;
 
-   F32 maxBodyTilt;              //Motorcycles? to use in future.
+   bool BodyTilt;              //Motorcycles? to use in future.
    F32 maxWheelSpeed;            // Engine torque is scale based on wheel speed
    F32 engineTorque;             // Engine force controlled through throttle
    F32 engineBrake;              // Break force applied when throttle is 0
